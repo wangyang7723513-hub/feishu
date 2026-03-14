@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>家庭共享日历</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <style>
+        /* CSS 内容内联 */
+        @layer utilities {
+            .pt-safe-top {
+                padding-top: env(safe-area-inset-top);
+            }
+            .pb-safe-bottom {
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+        }
+
+        /* 动画定义 */
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .animate-slide-up {
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        /* 隐藏滚动条 */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+
+        body {
+            background-color: #F2F2F7;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .ios-btn {
+            transition: all 0.2s;
+        }
+        .ios-btn:active {
+            opacity: 0.7;
+            transform: scale(0.98);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ios: {
+                            bg: '#F2F2F7',
+                            card: '#FFFFFF',
+                            blue: '#007AFF',
+                            red: '#FF3B30',
+                            gray: '#8E8E93',
+                            separator: '#C6C6C8'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #F2F2F7;
+            -webkit-tap-highlight-color: transparent;
+            /* 防止iOS点击高亮 */
+        }
+        .ios-btn {
+            transition: all 0.2s;
+        }
+        .ios-btn:active {
+            opacity: 0.7;
+            transform: scale(0.98);
+        }
+        /* 隐藏滚动条但保留功能 */
+        /* .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        } */
+    </style>
+</head>
+<body class="text-gray-900 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 pt-safe-top">
+        <div class="px-4 h-14 flex items-center justify-between">
+            <h1 class="text-xl font-bold tracking-tight">家庭日历</h1>
+            <div id="user-avatar-btn" class="hidden flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full cursor-pointer ios-btn">
+                <span id="current-user-name" class="text-sm font-medium">未登录</span>
+                <i class="ph-fill ph-user-circle text-xl text-gray-500"></i>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 overflow-y-auto overflow-x-hidden relative" id="main-container">
+        
+        <!-- 登录视图 (默认显示) -->
+        <div id="login-view" class="p-6 min-h-full flex flex-col items-center justify-center">
+            <h2 class="text-2xl font-bold mb-8 text-center">请选择您是谁？</h2>
+            <div class="grid grid-cols-2 gap-6 w-full max-w-sm" id="user-grid">
+                <!-- 用户卡片将通过 JS 生成 -->
+            </div>
+            
+            <div class="mt-12 w-full max-w-sm">
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+                    <h3 class="font-bold mb-2 text-lg">⚙️ 设置云端共享</h3>
+                    <p class="text-sm text-gray-500 mb-3">默认仅在本机保存。如需家人共享，请配置云端 Key。</p>
+                    <button data-action="showConfig" class="w-full py-3 bg-gray-100 text-gray-700 font-medium rounded-lg text-lg">配置共享</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 日历视图 (登录后显示) -->
+        <div id="calendar-view" class="hidden flex flex-col h-full">
+            <!-- 月份切换 -->
+            <div class="flex items-center justify-between px-6 py-4 bg-white shadow-sm z-10">
+                <button data-action="prevMonth" class="p-2 rounded-full hover:bg-gray-100 ios-btn">
+                    <i class="ph-bold ph-caret-left text-2xl text-ios-blue pointer-events-none"></i>
+                </button>
+                <h2 id="current-month-display" class="text-2xl font-bold">2023年 10月</h2>
+                <button data-action="nextMonth" class="p-2 rounded-full hover:bg-gray-100 ios-btn">
+                    <i class="ph-bold ph-caret-right text-2xl text-ios-blue pointer-events-none"></i>
+                </button>
+            </div>
+
+            <!-- 星期标题 -->
+            <div class="grid grid-cols-7 gap-1 px-2 py-2 bg-gray-50 border-b border-gray-200">
+                <div class="text-center text-sm font-medium text-gray-500">日</div>
+                <div class="text-center text-sm font-medium text-gray-500">一</div>
+                <div class="text-center text-sm font-medium text-gray-500">二</div>
+                <div class="text-center text-sm font-medium text-gray-500">三</div>
+                <div class="text-center text-sm font-medium text-gray-500">四</div>
+                <div class="text-center text-sm font-medium text-gray-500">五</div>
+                <div class="text-center text-sm font-medium text-gray-500">六</div>
+            </div>
+
+            <!-- 日历网格 -->
+            <div id="calendar-grid" class="grid grid-cols-7 gap-1 px-2 py-2 bg-white min-h-[300px]">
+                <!-- 日期格子将通过 JS 生成 -->
+            </div>
+
+            <!-- 选中日期的日程列表 -->
+            <div class="flex-1 bg-gray-50 p-4 overflow-y-auto">
+                <div class="flex justify-between items-end mb-3">
+                    <h3 id="selected-date-title" class="text-lg font-bold text-gray-700">今天</h3>
+                    <span class="text-sm text-gray-500" id="lunar-date">农历...</span>
+                </div>
+                
+                <div id="event-list" class="space-y-3 pb-20">
+                    <!-- 日程列表项 -->
+                </div>
+
+                <!-- 空状态提示 -->
+                <div id="empty-state" class="hidden flex flex-col items-center justify-center py-10 text-gray-400">
+                    <i class="ph-duotone ph-calendar-blank text-5xl mb-2"></i>
+                    <p class="text-lg">今天没有安排</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 悬浮添加按钮 (FAB) -->
+    <button id="add-btn" data-action="showAddModal" class="hidden fixed bottom-8 right-6 w-16 h-16 bg-ios-blue text-white rounded-full shadow-lg flex items-center justify-center ios-btn z-40">
+        <i class="ph-bold ph-plus text-3xl pointer-events-none"></i>
+    </button>
+
+    <!-- 添加日程弹窗 -->
+    <div id="add-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity">
+        <div class="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl p-6 animate-slide-up">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold">添加日程</h3>
+                <button data-action="hideAddModal" class="p-2 bg-gray-100 rounded-full">
+                    <i class="ph-bold ph-x text-lg pointer-events-none"></i>
+                </button>
+            </div>
+            
+            <form id="add-form">
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-gray-500 text-sm font-medium mb-1">做什么？</label>
+                        <input type="text" id="event-title" required placeholder="例如：吃降压药、去公园" class="w-full text-xl font-bold border-b-2 border-gray-200 py-2 focus:outline-none focus:border-ios-blue bg-transparent">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-gray-500 text-sm font-medium mb-1">几点？</label>
+                            <input type="time" id="event-time" class="w-full text-lg bg-gray-50 rounded-lg px-3 py-3 border-none">
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 text-sm font-medium mb-1">谁参与？</label>
+                            <select id="event-member" class="w-full text-lg bg-gray-50 rounded-lg px-3 py-3 border-none">
+                                <!-- 选项由 JS 生成 -->
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-ios-blue text-white font-bold text-xl py-4 rounded-xl shadow-md mt-4 ios-btn">
+                        确认添加
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 配置弹窗 -->
+    <div id="config-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm mx-4 rounded-2xl p-6 shadow-2xl">
+            <h3 class="text-xl font-bold mb-4">配置云端共享 (Supabase)</h3>
+            <p class="text-sm text-gray-500 mb-4">填写您的 Supabase Project URL 和 Anon Key 以启用跨设备同步。如果不填写，将仅在当前浏览器保存。</p>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase">Project URL</label>
+                    <input type="text" id="conf-url" class="w-full border rounded-lg p-2 text-sm font-mono" placeholder="https://xyz.supabase.co">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase">Anon Key</label>
+                    <input type="text" id="conf-key" class="w-full border rounded-lg p-2 text-sm font-mono" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+                </div>
+                
+                <div class="flex gap-3 pt-2">
+                    <button data-action="hideConfigModal" class="flex-1 py-3 bg-gray-100 font-bold rounded-xl text-gray-600">取消</button>
+                    <button data-action="saveConfig" class="flex-1 py-3 bg-green-500 text-white font-bold rounded-xl shadow-md">保存并连接</button>
+                </div>
+                <button data-action="clearConfig" class="w-full text-red-500 text-sm font-medium py-2">清除配置并重置</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 内联 app.js 代码
+        // 安全的本地存储包装器（防止在某些浏览器的 file:// 协议下报错）
+        const storage = {
+            get: (key) => {
+                try { return localStorage.getItem(key); } catch(e) { return null; }
+            },
+            set: (key, val) => {
+                try { localStorage.setItem(key, val); } catch(e) { console.warn('Storage error', e); }
+            },
+            remove: (key) => {
+                try { localStorage.removeItem(key); } catch(e) {}
+            }
+        };
+
+        // 安全生成 UUID
+        function generateId() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+
+        // 全局配置与状态
+        const APP_CONFIG = {
+            supabaseUrl: storage.get('calendar_supabase_url') || '',
+            supabaseKey: storage.get('calendar_supabase_key') || '',
+        };
+
+        const USERS = [
+            { id: 'dad', name: '爸爸', color: 'bg-blue-500', avatar: '👨🏻' },
+            { id: 'mom', name: '妈妈', color: 'bg-pink-500', avatar: '👩🏻' },
+            { id: 'grandpa', name: '爷爷', color: 'bg-orange-500', avatar: '👴🏻' },
+            { id: 'grandma', name: '奶奶', color: 'bg-purple-500', avatar: '👵🏻' },
+            { id: 'kid', name: '宝贝', color: 'bg-green-500', avatar: '👶🏻' }
+        ];
+
+        let state = {
+            currentUser: null,
+            currentDate: new Date(),
+            selectedDate: new Date(),
+            events: [],
+            mode: 'local'
+        };
+
+        let supabaseClient = null;
+
+        // 全局错误捕获（用于调试）
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error('Global Error:', message, error);
+            // alert('发生错误: ' + message);
+        };
+
+        // ================= 核心应用逻辑 =================
+
+        const app = {
+            // 初始化
+            init: async () => {
+                try {
+                    // 尝试连接 Supabase
+                    if (APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseKey) {
+                        if (window.supabase) {
+                            supabaseClient = window.supabase.createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseKey);
+                            state.mode = 'cloud';
+                            console.log('☁️ 云端模式已激活');
+                        } else {
+                            console.error('Supabase SDK 未加载，降级为本地模式');
+                        }
+                    } else {
+                        console.log('🏠 本地模式运行中');
+                    }
+
+                    app.renderLoginView();
+                    
+                    // 自动登录
+                    const savedUserId = storage.get('calendar_current_user');
+                    if (savedUserId) {
+                        const user = USERS.find(u => u.id === savedUserId);
+                        if (user) app.login(user);
+                    }
+                } catch (error) {
+                    console.error('初始化失败:', error);
+                    alert('初始化失败，请刷新页面重试: ' + error.message);
+                }
+            },
+
+            // 登录逻辑
+            login: async (userOrId) => {
+                try {
+                    const user = typeof userOrId === 'string' ? USERS.find(u => u.id === userOrId) : userOrId;
+                    if (!user) return;
+
+                    state.currentUser = user;
+                    storage.set('calendar_current_user', user.id);
+                    
+                    // UI 切换
+                    document.getElementById('login-view').classList.add('hidden');
+                    document.getElementById('calendar-view').classList.remove('hidden');
+                    document.getElementById('calendar-view').classList.add('flex');
+                    
+                    // 更新顶部栏
+                    const avatarBtn = document.getElementById('user-avatar-btn');
+                    avatarBtn.classList.remove('hidden');
+                    avatarBtn.innerHTML = `
+                        <span class="text-sm font-medium mr-1 pointer-events-none">${user.name}</span>
+                        <div class="w-8 h-8 ${user.color} rounded-full flex items-center justify-center text-lg shadow-sm text-white pointer-events-none">
+                            ${user.avatar}
+                        </div>
+                    `;
+                    avatarBtn.setAttribute('data-action', 'logout');
+
+                    // 显示添加按钮
+                    document.getElementById('add-btn').classList.remove('hidden');
+                    
+                    // 加载数据并渲染
+                    await app.loadEvents();
+                    app.renderCalendar();
+                    app.renderEventList();
+                } catch (error) {
+                    console.error('登录失败:', error);
+                }
+            },
+
+            // 数据加载
+            loadEvents: async () => {
+                try {
+                    if (state.mode === 'cloud' && supabaseClient) {
+                        const { data, error } = await supabaseClient
+                            .from('events')
+                            .select('*');
+                        if (!error && data) {
+                            state.events = data;
+                        } else {
+                            console.error('加载失败', error);
+                            if (error.code === '42P01' || error.message.includes('404')) {
+                                alert('⚠️ 云端数据库尚未初始化！\n\n请登录 Supabase -> SQL Editor，运行 README.md 中的建表代码。\n(错误代码: 表 events 不存在)');
+                            }
+                        }
+                    } else {
+                        const localData = storage.get('calendar_events');
+                        state.events = localData ? JSON.parse(localData) : [];
+                    }
+                } catch (error) {
+                    console.error('加载日程出错:', error);
+                    state.events = [];
+                }
+                // 数据更新后刷新视图
+                app.renderCalendar();
+                app.renderEventList();
+            },
+
+            // 日历操作
+            prevMonth: () => {
+                state.currentDate.setMonth(state.currentDate.getMonth() - 1);
+                app.renderCalendar();
+            },
+            
+            nextMonth: () => {
+                state.currentDate.setMonth(state.currentDate.getMonth() + 1);
+                app.renderCalendar();
+            },
+
+            selectDate: (dateStr) => {
+                // dateStr 格式: '2023-10-27'
+                const [y, m, d] = dateStr.split('-').map(Number);
+                state.selectedDate = new Date(y, m - 1, d);
+                app.renderCalendar();
+                app.renderEventList();
+            },
+
+            // 渲染日历
+            renderCalendar: () => {
+                try {
+                    const year = state.currentDate.getFullYear();
+                    const month = state.currentDate.getMonth();
+                    
+                    document.getElementById('current-month-display').textContent = `${year}年 ${month + 1}月`;
+                    
+                    const firstDay = new Date(year, month, 1);
+                    const lastDay = new Date(year, month + 1, 0);
+                    const daysInMonth = lastDay.getDate();
+                    const startDayOfWeek = firstDay.getDay(); // 0 = Sunday
+                    
+                    const grid = document.getElementById('calendar-grid');
+                    if (!grid) return;
+                    grid.innerHTML = '';
+                    
+                    // 填充空白
+                    for (let i = 0; i < startDayOfWeek; i++) {
+                        grid.innerHTML += `<div class="aspect-square"></div>`;
+                    }
+                    
+                    // 填充日期
+                    for (let d = 1; d <= daysInMonth; d++) {
+                        const currentLoopDate = new Date(year, month, d);
+                        const dateStr = app.formatDate(currentLoopDate);
+                        
+                        const isSelected = app.isSameDate(state.selectedDate, currentLoopDate);
+                        const isToday = app.isSameDate(new Date(), currentLoopDate);
+                        const hasEvents = state.events.some(e => e.date === dateStr);
+                        
+                        const el = document.createElement('div');
+                        // 样式逻辑
+                        let bgClass = isSelected ? 'bg-ios-blue text-white shadow-md transform scale-105' : (isToday ? 'bg-blue-50 text-ios-blue font-bold' : 'hover:bg-gray-100');
+                        
+                        el.className = `aspect-square flex flex-col items-center justify-center rounded-2xl relative cursor-pointer transition-all duration-200 ${bgClass}`;
+                        el.setAttribute('data-action', 'selectDate');
+                        el.setAttribute('data-date', dateStr);
+                        
+                        el.innerHTML = `
+                            <span class="text-xl pointer-events-none ${isSelected ? 'font-bold' : ''}">${d}</span>
+                            ${hasEvents ? `<span class="w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-ios-red'} mt-1 transition-colors pointer-events-none"></span>` : ''}
+                        `;
+                        grid.appendChild(el);
+                    }
+                } catch (error) {
+                    console.error('渲染日历出错:', error);
+                }
+            },
+
+            // 渲染列表
+            renderEventList: () => {
+                try {
+                    const dateStr = app.formatDate(state.selectedDate);
+                    // 按时间排序
+                    const dayEvents = state.events
+                        .filter(e => e.date === dateStr)
+                        .sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+                    
+                    const listEl = document.getElementById('event-list');
+                    const emptyEl = document.getElementById('empty-state');
+                    const titleEl = document.getElementById('selected-date-title');
+                    
+                    if (!listEl || !emptyEl || !titleEl) return;
+
+                    titleEl.textContent = `${state.selectedDate.getMonth() + 1}月${state.selectedDate.getDate()}日`;
+                    
+                    if (dayEvents.length === 0) {
+                        listEl.innerHTML = '';
+                        listEl.classList.add('hidden');
+                        emptyEl.classList.remove('hidden');
+                        return;
+                    }
+                    
+                    listEl.classList.remove('hidden');
+                    emptyEl.classList.add('hidden');
+                    
+                    listEl.innerHTML = dayEvents.map(event => {
+                        const member = USERS.find(u => u.id === event.member_id) || USERS[0];
+                        const creator = USERS.find(u => u.id === event.creator_id);
+                        
+                        return `
+                            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between animate-fade-in mb-3">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-14 h-14 ${member.color} rounded-full flex items-center justify-center text-3xl text-white shadow-sm shrink-0">
+                                        ${member.avatar}
+                                    </div>
+                                    <div>
+                                        <h4 class="text-xl font-bold text-gray-800 leading-tight">${event.title}</h4>
+                                        <div class="flex items-center gap-3 text-gray-500 text-sm mt-1.5">
+                                            <span class="bg-gray-100 px-2 py-1 rounded-md font-mono font-medium text-gray-600">${event.time || '全天'}</span>
+                                            ${creator && creator.id !== member.id ? `<span class="text-xs text-gray-400">由 ${creator.name} 添加</span>` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button data-action="deleteEvent" data-eventid="${event.id}" class="w-10 h-10 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
+                                    <i class="ph-bold ph-trash text-xl pointer-events-none"></i>
+                                </button>
+                            </div>
+                        `;
+                    }).join('');
+                } catch (error) {
+                    console.error('渲染日程列表出错:', error);
+                }
+            },
+
+            renderLoginView: () => {
+                try {
+                    const grid = document.getElementById('user-grid');
+                    if (!grid) return;
+                    
+                    grid.innerHTML = USERS.map(user => `
+                        <div data-action="login" data-userid="${user.id}" class="flex flex-col items-center justify-center p-6 bg-white rounded-2xl shadow-sm border border-gray-100 active:scale-95 transition-transform cursor-pointer">
+                            <div class="w-20 h-20 ${user.color} rounded-full flex items-center justify-center text-4xl shadow-md mb-3 text-white pointer-events-none">
+                                ${user.avatar}
+                            </div>
+                            <span class="text-xl font-bold text-gray-700 pointer-events-none">${user.name}</span>
+                        </div>
+                    `).join('');
+                } catch (error) {
+                    console.error('渲染登录视图出错:', error);
+                }
+            },
+
+            // 弹窗与表单
+            showAddModal: () => {
+                document.getElementById('add-modal').classList.remove('hidden');
+                
+                // 默认选中当前登录用户
+                const select = document.getElementById('event-member');
+                select.innerHTML = USERS.map(u => `
+                    <option value="${u.id}" ${u.id === state.currentUser.id ? 'selected' : ''}>${u.name}</option>
+                `).join('');
+                
+                // 默认时间设为当前最近的半点
+                const now = new Date();
+                now.setMinutes(now.getMinutes() > 30 ? 60 : 30);
+                const timeStr = now.toTimeString().slice(0, 5);
+                document.getElementById('event-time').value = timeStr;
+                
+                // 聚焦输入框
+                setTimeout(() => document.getElementById('event-title').focus(), 100);
+            },
+
+            hideAddModal: () => {
+                document.getElementById('add-modal').classList.add('hidden');
+            },
+
+            saveEvent: async (e) => {
+                e.preventDefault();
+                const titleInput = document.getElementById('event-title');
+                const timeInput = document.getElementById('event-time');
+                const memberInput = document.getElementById('event-member');
+
+                if (!titleInput.value.trim()) return;
+
+                const newEvent = {
+                    id: generateId(),
+                    title: titleInput.value.trim(),
+                    date: app.formatDate(state.selectedDate),
+                    time: timeInput.value,
+                    member_id: memberInput.value,
+                    creator_id: state.currentUser.id,
+                    created_at: new Date().toISOString()
+                };
+
+                // 乐观更新 UI
+                state.events.push(newEvent);
+                app.renderEventList();
+                app.renderCalendar();
+                app.hideAddModal();
+                titleInput.value = '';
+
+                // 异步保存
+                if (state.mode === 'cloud' && supabaseClient) {
+                    const { error } = await supabaseClient.from('events').insert(newEvent);
+                    if (error) {
+                        console.error('保存错误', error);
+                        if (error.code === '42P01' || error.message.includes('404')) {
+                            alert('⚠️ 保存失败：云端数据表不存在！\n请先在 Supabase 中运行 SQL 建表语句。');
+                        } else {
+                            alert('保存到云端失败，请检查网络或配置 Key 是否正确');
+                        }
+                        // 回滚
+                        state.events = state.events.filter(e => e.id !== newEvent.id);
+                        app.renderEventList();
+                    }
+                } else {
+                    storage.set('calendar_events', JSON.stringify(state.events));
+                }
+            },
+
+            deleteEvent: async (eventId) => {
+                if (!confirm('确定删除吗？')) return;
+
+                // 乐观更新
+                const originalEvents = [...state.events];
+                state.events = state.events.filter(e => e.id !== eventId);
+                app.renderEventList();
+                app.renderCalendar();
+
+                if (state.mode === 'cloud' && supabaseClient) {
+                    const { error } = await supabaseClient.from('events').delete().eq('id', eventId);
+                    if (error) {
+                        alert('删除失败');
+                        state.events = originalEvents;
+                        app.renderEventList();
+                    }
+                } else {
+                    storage.set('calendar_events', JSON.stringify(state.events));
+                }
+            },
+
+            // 配置相关
+            showConfigModal: () => {
+                document.getElementById('config-modal').classList.remove('hidden');
+                document.getElementById('conf-url').value = APP_CONFIG.supabaseUrl;
+                document.getElementById('conf-key').value = APP_CONFIG.supabaseKey;
+            },
+
+            hideConfigModal: () => {
+                document.getElementById('config-modal').classList.add('hidden');
+            },
+
+            saveConfig: () => {
+                const url = document.getElementById('conf-url').value.trim();
+                const key = document.getElementById('conf-key').value.trim();
+                
+                if (url && key) {
+                    storage.set('calendar_supabase_url', url);
+                    storage.set('calendar_supabase_key', key);
+                    alert('配置已保存，即将刷新页面...');
+                    location.reload();
+                } else {
+                    alert('请填写完整信息');
+                }
+            },
+
+            clearConfig: () => {
+                if(confirm('确定清除云端配置回到本地模式吗？')) {
+                    storage.remove('calendar_supabase_url');
+                    storage.remove('calendar_supabase_key');
+                    location.reload();
+                }
+            },
+
+            // 工具函数
+            formatDate: (date) => {
+                return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            },
+
+            isSameDate: (d1, d2) => {
+                return d1.getFullYear() === d2.getFullYear() &&
+                    d1.getMonth() === d2.getMonth() &&
+                    d1.getDate() === d2.getDate();
+            },
+
+            // 统一事件委托处理
+            handleGlobalClick: (e) => {
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+                
+                const action = target.getAttribute('data-action');
+                
+                switch(action) {
+                    case 'showConfig': app.showConfigModal(); break;
+                    case 'hideConfigModal': app.hideConfigModal(); break;
+                    case 'saveConfig': app.saveConfig(); break;
+                    case 'clearConfig': app.clearConfig(); break;
+                    case 'login': 
+                        app.login(target.getAttribute('data-userid')); 
+                        break;
+                    case 'logout':
+                        if(confirm('要切换账号吗？')) {
+                            storage.remove('calendar_current_user');
+                            location.reload();
+                        }
+                        break;
+                    case 'prevMonth': app.prevMonth(); break;
+                    case 'nextMonth': app.nextMonth(); break;
+                    case 'selectDate': 
+                        app.selectDate(target.getAttribute('data-date')); 
+                        break;
+                    case 'showAddModal': app.showAddModal(); break;
+                    case 'hideAddModal': app.hideAddModal(); break;
+                    case 'deleteEvent':
+                        app.deleteEvent(target.getAttribute('data-eventid'));
+                        break;
+                }
+            }
+        };
+
+        // 确保 DOM 加载完成后再初始化，并且暴露给全局
+        window.app = app;
+        // 立即执行一次绑定，防止延迟导致的问题
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                app.init();
+                document.body.addEventListener('click', app.handleGlobalClick);
+                const form = document.getElementById('add-form');
+                if (form) form.addEventListener('submit', app.saveEvent);
+            });
+        } else {
+            app.init();
+            document.body.addEventListener('click', app.handleGlobalClick);
+            const form = document.getElementById('add-form');
+            if (form) form.addEventListener('submit', app.saveEvent);
+        }
+    </script>
+</body>
+</html>
